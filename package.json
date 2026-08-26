@@ -1,0 +1,32 @@
+{
+  "name": "opencode-notify-crossx",
+  "version": "0.1.0",
+  "description": "Cross-platform desktop notifications for opencode — pings when run finishes or input is needed. Focus-aware, WSL + macOS + Linux. No sound by default, visual toast only.",
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "keywords": ["opencode", "opencode-plugin", "notification", "wsl", "cross-platform", "desktop"],
+  "author": "Davis Dey",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/davissekai/opencode-notify-crossx"
+  },
+  "homepage": "https://github.com/davissekai/opencode-notify-crossx#readme",
+  "bugs": {
+    "url": "https://github.com/davissekai/opencode-notify-crossx/issues"
+  },
+  "files": ["index.js", "index.d.ts", "README.md", "LICENSE"],
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.14.40"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": "^1.14.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
