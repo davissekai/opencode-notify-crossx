@@ -10,7 +10,7 @@ Focus-aware: only pings when opencode is not the frontmost window, so you are no
 | macOS | `osascript` display notification | `afplay` | `System Events` frontmost |
 | Linux | `notify-send` via libnotify | `paplay` | `xdotool` |
 
-No sound by default — visual toast only. Set `sound: true` in code to re-enable.
+No sound by default — visual toast only. See [Settings](#settings) to turn it on.
 
 ## Install
 
@@ -45,32 +45,31 @@ Restart opencode.
 
 - `session.idle` → Run finished
 - `session.error` → Run failed
-- `permission.updated` / `permission.ask` → Input needed
+- `permission.asked` / `permission.updated` → Input needed (one ping per request)
 
 Debounced per session/permission to avoid spam.
 
 ## Focus-aware
 
-Only notifies when the terminal is not focused. If opencode is the frontmost window (Windows Terminal, VS Code, etc.), the ping is suppressed and logged as `suppressed (focused)`.
+Only notifies when your terminal or editor is not the frontmost window, so you are not pinged while watching. On WSL it checks the Windows foreground window title; on macOS the frontmost app; on Linux `xdotool` (X11 only, so on Wayland it always notifies).
 
-To notify even when focused, edit `index.js`:
+## Settings
 
-```js
-const CONFIG = {
-  onlyWhenUnfocused: false, // always ping
-  sound: false,
-}
+No code edits needed. Use environment variables:
+
+```bash
+export OPENCODE_NOTIFY_SOUND=1            # play a sound too (default: off)
+export OPENCODE_NOTIFY_ONLY_UNFOCUSED=0   # ping even when focused (default: on)
+export OPENCODE_NOTIFY_DESKTOP=0          # no desktop toast (default: on)
 ```
 
-## Sound
+Or a file at `~/.config/opencode/notify.json`:
 
-Off by default per user request. To enable:
-
-```js
-const CONFIG = {
-  sound: true,
-}
+```json
+{ "sound": true, "onlyWhenUnfocused": false }
 ```
+
+Env vars override the file.
 
 ## Local development (single-file plugin)
 
@@ -81,7 +80,8 @@ The same code also works as a single-file local plugin at `~/.config/opencode/pl
 - `isWsl()` checks `/proc/version` for `microsoft`/`wsl`
 - `isTerminalFocused()` checks foreground window title via PowerShell on WSL/Windows, AppleScript on macOS, `xdotool` on Linux
 - `sendDesktop()` tries `osascript` → PowerShell toast → `notify-send` in order
-- `notify()` respects `CONFIG.onlyWhenUnfocused` and `CONFIG.sound`
+- `notify()` respects `onlyWhenUnfocused` and `sound`
+- One plugin export only, and one debounced ping per permission request, so you never get duplicates
 
 ## License
 

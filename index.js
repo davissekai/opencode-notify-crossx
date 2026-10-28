@@ -12,13 +12,49 @@
  *  fallback: terminal bell (\x07)
  *
  * Focus-aware: only notifies when terminal is not frontmost (when you're away)
+ *
+ * Only ONE plugin function is exported on purpose: opencode registers every
+ * exported function, so aliases would make every notification fire several times.
  */
 
-const CONFIG = {
+const DEFAULTS = {
   onlyWhenUnfocused: true, // only ping when CLI is not in view
-  sound: false,            // visual only per user pref — set true to re-enable
+  sound: false,            // visual only by default
   desktop: true,
 };
+
+function envBool(name) {
+  const v = process.env[name];
+  if (v === undefined || v === "") return undefined;
+  return ["1", "true", "yes", "on"].includes(String(v).toLowerCase());
+}
+
+// Settings, lowest to highest priority:
+//   defaults → ~/.config/opencode/notify.json → env vars
+//   OPENCODE_NOTIFY_SOUND, OPENCODE_NOTIFY_ONLY_UNFOCUSED, OPENCODE_NOTIFY_DESKTOP
+async function loadConfig() {
+  let file = {};
+  try {
+    const fs = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const base = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
+    const f = path.join(base, "opencode", "notify.json");
+    if (fs.existsSync(f)) file = JSON.parse(fs.readFileSync(f, "utf8")) || {};
+  } catch {}
+  const env = {
+    sound: envBool("OPENCODE_NOTIFY_SOUND"),
+    onlyWhenUnfocused: envBool("OPENCODE_NOTIFY_ONLY_UNFOCUSED"),
+    desktop: envBool("OPENCODE_NOTIFY_DESKTOP"),
+  };
+  const out = { ...DEFAULTS };
+  for (const src of [file, env])
+    for (const k of Object.keys(DEFAULTS))
+      if (typeof src[k] === "boolean") out[k] = src[k];
+  return out;
+}
+
+const CONFIG = { ...DEFAULTS };
 
 // debug helper — use client.app.log if available, else console
 async function log(client, msg, extra = {}) {
@@ -37,6 +73,20 @@ function escapeAppleScript(str) {
 
 function escapePs(str) {
   return String(str).replace(/'/g, "''");
+}
+
+// run a command with a hard timeout; kills it if it hangs, resolves "" on any failure
+async function runWithTimeout(cmd, args, ms) {
+  try {
+    const { execFile } = await import("node:child_process");
+    return await new Promise((resolve) => {
+      execFile(cmd, args, { timeout: ms, killSignal: "SIGKILL", windowsHide: true }, (err, stdout) =>
+        resolve(err ? "" : String(stdout || "")),
+      );
+    });
+  } catch {
+    return "";
+  }
 }
 
 let _wslCache = null;
@@ -81,32 +131,25 @@ $sb=New-Object System.Text.StringBuilder ($len+1)
 [F]::GetWindowText($h,$sb,$sb.Capacity)|Out-Null
 Write-Output $sb.ToString()
 `.trim();
-      const raw = await Promise.race([
-        $`powershell.exe -Command ${ps}`.quiet().nothrow().text(),
-        new Promise((res) => setTimeout(() => res(""), 1500)),
-      ]);
+      const raw = await runWithTimeout("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], 1500);
       const title = (raw || "").trim().toLowerCase();
       if (!title) return false; // can't determine → assume not focused so we notify (fail-safe)
+      // match terminal / editor apps by their window-title suffix, not loose words
       const terms = [
         "windows terminal",
-        "ubuntu",
-        "wsl",
         "opencode",
-        "code -", // VS Code title contains " - Visual Studio Code"
         "visual studio code",
-        "cursor",
+        "- cursor",
         "wezterm",
         "alacritty",
         "kitty",
         "ghostty",
-        "terminal",
-        "powershell",
-        "cmd",
+        "windows powershell",
+        "command prompt",
       ];
-      // if foreground looks like a terminal/editor, treat as focused
-      for (const t of terms) if (title.includes(t)) return true;
-      // also check for WSL path patterns like "/home/davisdey1"
-      if (title.includes("/home/") || title.includes("~")) return true;
+      if (terms.some((t) => title.includes(t))) return true;
+      // a bare WSL shell window titled like "user@host: ~/dir"
+      if (/^[\w.-]+@[\w.-]+: /.test(title)) return true;
       return false;
     }
 
@@ -251,6 +294,7 @@ async function notify($, client, title, body, opts = {}) {
 }
 
 export const Notify = async ({ client, $, directory }) => {
+  Object.assign(CONFIG, await loadConfig());
   await log(client, "notify plugin loaded (focus-aware)", { directory, config: CONFIG });
 
   const lastPing = new Map();
@@ -302,7 +346,8 @@ export const Notify = async ({ client, $, directory }) => {
         ) {
           const perm = event.properties;
           const sid = perm?.sessionID || "unknown";
-          if (!shouldPing(`perm:${sid}:${perm?.id || perm?.title || ""}`, 1500)) return;
+          // permission.asked and permission.updated both fire for one request: share one key
+          if (!shouldPing(`perm:${sid}:${perm?.id || perm?.title || ""}`, 5000)) return;
           const title = perm?.title || perm?.type || "Permission";
           await notify($, client, "opencode — input needed ●", `${title} — approval required`, {
             urgency: "critical",
@@ -314,20 +359,6 @@ export const Notify = async ({ client, $, directory }) => {
       }
     },
 
-    "permission.ask": async (input, output) => {
-      try {
-        if (!shouldPing(`ask:${input.sessionID}:${input.id}`, 1500)) return;
-        if (output.status === "ask") {
-          await notify($, client, "opencode — input needed ●", `${input.title || input.type} — approval required`, {
-            urgency: "critical",
-          });
-        }
-      } catch (e) {
-        await log(client, "permission.ask notify error", { error: String(e) });
-      }
-    },
   };
 };
 
-export const NotifyPlugin = Notify;
-export const NotificationPlugin = Notify;
